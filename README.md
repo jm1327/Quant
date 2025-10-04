@@ -104,7 +104,7 @@ Key flags:
 - `--end-datetime` specifies the end time（default is current time）。
 - `--output-dir` sets a custom save directory（default `market_data/`）。
 
-生成的文件命名为 `<symbol>_<timeframe>_bars_macd.csv`，已自动补充 MACD/Signal/Hist 字段，可直接用于回测。
+The generated file is named `<symbol>_<timeframe>_bars_macd.csv`, with MACD/Signal/Hist fields automatically added, ready for backtesting.
 
 ### Strategy Selection
 
