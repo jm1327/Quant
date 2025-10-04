@@ -1,0 +1,38 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local configuration secrets
+*.env
+strategy.env
+
+# Logs and runtime artifacts
+*.log
+logs/
+trading_logs/
+
+# Historical market data downloads
+market_data/
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
