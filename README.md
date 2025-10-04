@@ -100,9 +100,9 @@ python -m quant_trading.tools.fetch_historical_data --symbols SMR --duration "6 
 ```
 
 Key flags:
-- `--all-hours` includes pre/after-hours quotes (otherwise仅常规交易时段)。
-- `--end-datetime` 指定截止时间（默认当前）。
-- `--output-dir` 自定义保存目录（默认 `market_data/`）。
+- `--all-hours` includes pre/after-hours quotes (otherwise only regular trading hours)。
+- `--end-datetime` specifies the end time（default is current time）。
+- `--output-dir` sets a custom save directory（default `market_data/`）。
 
 生成的文件命名为 `<symbol>_<timeframe>_bars_macd.csv`，已自动补充 MACD/Signal/Hist 字段，可直接用于回测。
 
