@@ -6,9 +6,9 @@ Modular Python tools for connecting to Interactive Brokers TWS and accessing tra
 
 The project uses a modular architecture with the following components:
 
-- **`ibkr_connection.py`** - Base connection class for TWS
-- **`portfolio_tracker.py`** - Portfolio and account information retrieval
-- **`market_data_tracker.py`** - Real-time market data functionality (aggregates 1/3/5/10 minute bars with MACD)
+- **`quant_trading.core.ibkr_connection`** – Base connection class for TWS
+- **`quant_trading.core.portfolio_tracker`** – Portfolio and account information retrieval
+- **`quant_trading.data.market_data_tracker`** – Real-time market data functionality (aggregates 1/3/5/10 minute bars with MACD)
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ Retrieve portfolio and account information:
 venv\Scripts\activate
 
 # Run portfolio tracker
-python portfolio_tracker.py
+python -m quant_trading.core.portfolio_tracker
 ```
 
 **Features:**
@@ -61,7 +61,7 @@ Get real-time market data:
 venv\Scripts\activate
 
 # Run market data tracker
-python market_data_tracker.py
+python -m quant_trading.data.market_data_tracker
 ```
 
 **Features:**
@@ -91,6 +91,29 @@ python -m quant_trading.backtesting.run_backtest --timeframe 5m --data-dir marke
 - Supports commission assumptions and custom symbol baskets.
 - Pair it with the `fetch_historical_data.py` tool (see below) to populate fresh OHLCV datasets directly from TWS.
 
+### 5-Minute Trade Visualization GUI
+
+Inspect a single symbol's 5-minute candlesticks and trade markers over the past year using the integrated GUI:
+
+```powershell
+# Activate virtual environment
+venv\Scripts\activate
+
+# Run a backtest (writes cached JSON into backtest_results/<timeframe>/)
+python -m quant_trading.backtesting.run_backtest --timeframe 5m --data-dir market_data
+
+# Launch the visualizer (reads cached JSON under backtest_results/)
+python -m quant_trading.visualization.trade_visualizer --timeframe 5m --cache-dir backtest_results
+```
+
+Features:
+- Automatically scans `backtest_results/<timeframe>/` for cached `*_backtest.json` files, with in-app drop-downs to switch timeframe and symbol.
+- Uses cached backtest results (candles + trades) stored under `backtest_results/`, so the GUI loads instantly without re-running simulations.
+- Overlays long/short entry and exit markers on the candlestick chart (green up arrow = long entry, blue down arrow = long exit, red down arrow = short entry, orange up arrow = short exit).
+- Displays period coverage, closed-trade count, net profit, return, and max drawdown in the header for quick performance review.
+
+> **Tip:** Re-run `python -m quant_trading.backtesting.run_backtest` whenever you refresh the CSV data or adjust strategy settings so the visualization reflects the latest trades. Use `--cache-dir` to choose a different output location or `--no-cache` to suppress cache generation.
+
 ### Historical Data Downloader
 
 Use the bundled script to fetch raw OHLCV bars from IBKR and write them into `market_data/`:
@@ -100,9 +123,9 @@ python -m quant_trading.tools.fetch_historical_data --symbols SMR --duration "6 
 ```
 
 Key flags:
-- `--all-hours` includes pre/after-hours quotes (otherwise仅常规交易时段)。
-- `--end-datetime` 指定截止时间（默认当前）。
-- `--output-dir` 自定义保存目录（默认 `market_data/`）。
+- `--all-hours` includes pre/after-hours quotes (otherwise only regular trading hours).
+- `--end-datetime` sets the cutoff timestamp (default: now).
+- `--output-dir` changes the save directory (default: `market_data/`).
 
 生成的文件命名为 `<symbol>_<timeframe>_bars_macd.csv`，已自动补充 MACD/Signal/Hist 字段，可直接用于回测。
 

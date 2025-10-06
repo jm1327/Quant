@@ -14,6 +14,7 @@ from ibapi.contract import Contract
 
 from quant_trading.backtesting.engine import HistoricalDataLoader
 from quant_trading.core.ibkr_connection import IBKRConnection
+from quant_trading.config.stock_config import STOCKS
 
 
 def timeframe_to_suffix(bar_size: str) -> str:
@@ -205,7 +206,11 @@ class HistoricalDataDownloader(IBKRConnection):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Download historical bar data from IBKR.")
-    parser.add_argument("--symbols", nargs="+", required=True, help="Symbols to download (e.g. AAPL MSFT)")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        help="Symbols to download (e.g. AAPL MSFT). Defaults to stock_config.STOCKS when omitted.",
+    )
     parser.add_argument("--duration", default="2 Y", help="Duration string, e.g. '2 Y', '6 M', '10 D'")
     parser.add_argument("--bar-size", default="5 mins", help="Bar size setting, e.g. '5 mins', '10 mins', '1 hour'")
     parser.add_argument("--what-to-show", default="TRADES", help="Data type, e.g. TRADES, MIDPOINT, BID, ASK")
@@ -222,7 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include pre/post market data (sets useRTH=0). Default only regular trading hours.",
     )
     parser.add_argument(
-        "--output-dir", default="market_data", help="Directory where CSV files are written (default market_data)"
+        "--output-dir",
+        default="market_data",
+        help=(
+            "Base directory for CSV output (default market_data). Files are organized into a timeframe subfolder, "
+            "e.g. market_data/5m."
+        ),
     )
     parser.add_argument(
         "--connect-timeout", type=int, default=15, help="Timeout in seconds for establishing the TWS connection"
@@ -234,9 +244,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.symbols:
+        target_symbols = [symbol.upper() for symbol in args.symbols]
+    else:
+        target_symbols = [symbol.upper() for symbol in STOCKS]
+        if not target_symbols:
+            print("No symbols provided and stock_config.STOCKS is empty; nothing to download.")
+            return 1
+        print(
+            "No --symbols argument supplied; defaulting to stock_config.STOCKS: "
+            + ", ".join(target_symbols)
+        )
+
+    timeframe_suffix = timeframe_to_suffix(args.bar_size)
+    output_dir = Path(args.output_dir) / timeframe_suffix
+    print(f"Writing CSV output to {output_dir}")
+
     downloader = HistoricalDataDownloader(
         client_id=args.client_id,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         duration=args.duration,
         bar_size=args.bar_size,
         what_to_show=args.what_to_show,
@@ -250,7 +276,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     try:
-        for symbol in args.symbols:
+        for symbol in target_symbols:
             df = downloader.fetch_symbol(
                 symbol,
                 exchange=args.exchange,

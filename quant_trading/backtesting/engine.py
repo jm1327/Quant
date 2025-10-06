@@ -103,12 +103,22 @@ class HistoricalDataLoader:
 
     def _resolve_path(self, symbol: str) -> Path:
         filename = f"{symbol.lower()}_{self.timeframe}_bars_macd.csv"
-        return self.base_dir / filename
+        candidates = [
+            self.base_dir / filename,
+            self.base_dir / self.timeframe / filename,
+            self.base_dir / self.timeframe.upper() / filename,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError(
+            "Historical data for '{symbol}' not found. Checked: "
+            .format(symbol=symbol)
+            + ", ".join(str(path) for path in candidates)
+        )
 
     def load_symbol(self, symbol: str) -> pd.DataFrame:
         path = self._resolve_path(symbol)
-        if not path.exists():
-            raise FileNotFoundError(f"Historical data for '{symbol}' not found at {path}")
 
         df = pd.read_csv(path, parse_dates=["datetime"])
         if "datetime" not in df.columns:
@@ -402,6 +412,8 @@ class BacktestEngine:
 
             if trade_decision.get("should_trade") and signal.get("action") in {"BUY", "SELL"}:
                 trade_type = signal.get("trade_type", "OPEN")
+                should_open_position = trade_type != "CLOSE"
+
                 if trade_type in {"CLOSE", "CLOSE_AND_REVERSE"}:
                     close_qty = int(signal.get("close_quantity", abs(pos_snapshot["position"])))
                     if close_qty > 0:
@@ -410,28 +422,28 @@ class BacktestEngine:
                             "position": self.positions[symbol]["quantity"],
                             "avg_cost": self.positions[symbol]["avg_price"],
                         }
-                if trade_type == "CLOSE":
-                    continue
+                    should_open_position = trade_type == "CLOSE_AND_REVERSE"
 
-                account_info_after = {
-                    "NetLiquidation": self.cash + self._current_market_value(),
-                    "AvailableFunds": self.cash,
-                    "BuyingPower": self.cash,
-                }
+                if should_open_position:
+                    account_info_after = {
+                        "NetLiquidation": self.cash + self._current_market_value(),
+                        "AvailableFunds": self.cash,
+                        "BuyingPower": self.cash,
+                    }
 
-                position_calc = self.risk_manager.calculate_position_size(account_info_after, signal)
-                quantity = int(position_calc.get("quantity", 0)) if position_calc.get("valid") else 0
+                    position_calc = self.risk_manager.calculate_position_size(account_info_after, signal)
+                    quantity = int(position_calc.get("quantity", 0)) if position_calc.get("valid") else 0
 
-                if quantity > 0:
-                    self._open_position(
-                        symbol,
-                        timestamp,
-                        price,
-                        quantity,
-                        signal.get("action", "BUY"),
-                        signal.get("reason", "Signal"),
-                        trade_type,
-                    )
+                    if quantity > 0:
+                        self._open_position(
+                            symbol,
+                            timestamp,
+                            price,
+                            quantity,
+                            signal.get("action", "BUY"),
+                            signal.get("reason", "Signal"),
+                            trade_type,
+                        )
 
             market_value = self._current_market_value()
             equity_after = self.cash + market_value

@@ -28,10 +28,17 @@ strategy.env
 # Logs and runtime artifacts
 *.log
 logs/
-trading_logs/
+trading_logs/**/*.json
+trading_logs/**/*.csv
+trading_logs/**/*.log
+trading_logs/__pycache__/
+!trading_logs/**/*.py
 
 # Historical market data downloads
 market_data/
+
+# Backtest cache outputs
+backtest_results/
 
 # OS-specific junk
 .DS_Store

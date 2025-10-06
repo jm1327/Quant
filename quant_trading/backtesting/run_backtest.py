@@ -7,6 +7,7 @@ import argparse
 from typing import List
 
 from quant_trading.backtesting.engine import BacktestEngine, HistoricalDataLoader
+from quant_trading.backtesting.cache_exporter import export_backtest_caches
 from quant_trading.config.stock_config import STOCKS
 from quant_trading.config.trading_config import INITIAL_CAPITAL
 from quant_trading.core.strategy_loader import get_strategy_class_name_list, load_strategy
@@ -54,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.0,
         help="Commission per trade execution (flat amount, default: 0)",
     )
+    parser.add_argument(
+        "--cache-dir",
+        default="backtest_results",
+        help="Directory where per-symbol cache files are written (default: backtest_results)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Skip writing cached JSON output for visualization tools.",
+    )
     return parser
 
 
@@ -90,6 +101,21 @@ def main(argv: List[str] | None = None) -> None:
 
     result = engine.run(args.symbols, start=args.start, end=args.end)
     result.pretty_print()
+
+    if not args.no_cache:
+        written = export_backtest_caches(
+            result=result,
+            loader=loader,
+            symbols=args.symbols,
+            timeframe=args.timeframe,
+            output_dir=args.cache_dir,
+        )
+        if written:
+            print("\nCached backtest data written to:")
+            for path in written:
+                print(f" - {path}")
+        else:
+            print("\nNo cached JSON files were written (no data available for requested symbols).")
 
 
 if __name__ == "__main__":
