@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
 
-from quant_trading.config.trading_config import (
+from quant_trading.config.strategy_defaults import (
     MACD_FAST_PERIOD,
     MACD_SIGNAL_PERIOD,
     MACD_SLOW_PERIOD,

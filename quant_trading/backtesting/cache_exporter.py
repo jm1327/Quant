@@ -34,12 +34,14 @@ def export_backtest_caches(
     loader: HistoricalDataLoader,
     symbols: Sequence[str],
     timeframe: str,
+    strategy_name: str,
     output_dir: Path | str,
 ) -> List[Path]:
     """Write per-symbol cache files compatible with the visualization tools."""
 
     timeframe_norm = timeframe.strip().lower()
-    base_output = Path(output_dir) / timeframe_norm
+    strategy_norm = strategy_name.upper()
+    base_output = Path(output_dir) / strategy_norm / timeframe_norm
     base_output.mkdir(parents=True, exist_ok=True)
 
     summary_map = {summary.symbol.upper(): summary for summary in result.summaries}

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Dict, Any
 
 from .base import BaseStrategy
+from quant_trading.config.strategy_defaults import MACD_DEFAULT_CONFIG
 
 
 class MACDStrategy(BaseStrategy):
@@ -16,11 +17,14 @@ class MACDStrategy(BaseStrategy):
     def __init__(self) -> None:
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.last_signals: Dict[str, Dict[str, Any]] = {}
-        self.timeframe_minutes: int = 5
+        default_timeframe = int(MACD_DEFAULT_CONFIG.get("TIMEFRAME", "5"))
+        self.timeframe_minutes = default_timeframe
 
     def configure(self, config: Dict[str, str]) -> None:
         super().configure(config)
-        raw = config.get("TIMEFRAME") if config else None
+        if not config:
+            config = {}
+        raw = config.get("TIMEFRAME") or MACD_DEFAULT_CONFIG.get("TIMEFRAME")
         if raw is None:
             return
         try:

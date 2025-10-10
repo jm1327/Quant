@@ -15,6 +15,7 @@ import mplfinance as mpf
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.lines import Line2D
 
 
 @dataclass
@@ -32,46 +33,102 @@ class BacktestCacheRepository:
     def __init__(
         self,
         cache_dir: Path | str = "backtest_results",
+        strategy: str | None = None,
         timeframe: str | None = "5m",
     ) -> None:
         self.base_dir = Path(cache_dir)
+        self.strategy: str | None = strategy.upper() if strategy else None
         self.timeframe: str | None = timeframe.strip().lower() if timeframe else None
-        available = self.list_timeframes()
-        if not available:
+        
+        # Auto-detect strategy and timeframe if not provided
+        available_strategies = self.list_strategies()
+        if not available_strategies:
             return
-        if self.timeframe not in available:
-            self.timeframe = available[0]
+        if self.strategy not in available_strategies:
+            self.strategy = available_strategies[0]
+            
+        available_timeframes = self.list_timeframes()
+        if not available_timeframes:
+            return
+        if self.timeframe not in available_timeframes:
+            self.timeframe = available_timeframes[0]
 
     # ------------------------------------------------------------------
     # Discovery helpers
     # ------------------------------------------------------------------
+    def list_strategies(self) -> List[str]:
+        """List available strategies based on directory structure."""
+        if not self.base_dir.exists():
+            return []
+
+        strategies: set[str] = set()
+        
+        # Check for new structure: backtest_results/STRATEGY/timeframe/
+        for entry in self.base_dir.iterdir():
+            if entry.is_dir():
+                # Look for subdirectories with JSON files
+                for subdir in entry.iterdir():
+                    if subdir.is_dir() and any(subdir.glob("*_backtest.json")):
+                        strategies.add(entry.name.upper())
+                        break
+
+        # Support legacy structure: backtest_results/timeframe/
+        legacy_timeframes = set()
+        for entry in self.base_dir.iterdir():
+            if entry.is_dir() and any(entry.glob("*_backtest.json")):
+                legacy_timeframes.add(entry.name.lower())
+                
+        # If we found legacy structure but no new structure, assume legacy is from default strategy
+        if legacy_timeframes and not strategies:
+            strategies.add("MACD")  # Assume legacy files are from MACD strategy
+        
+        return sorted(strategies)
+
     def list_timeframes(self) -> List[str]:
+        """List available timeframes for the current strategy."""
         if not self.base_dir.exists():
             return []
 
         timeframes: set[str] = set()
-        # First, check for subdirectories such as backtest_results/5m
-        for entry in self.base_dir.iterdir():
-            if entry.is_dir() and any(entry.glob("*_backtest.json")):
-                timeframes.add(entry.name.lower())
+        
+        # Check new structure: backtest_results/STRATEGY/timeframe/
+        if self.strategy:
+            strategy_dir = self.base_dir / self.strategy
+            if strategy_dir.exists():
+                for entry in strategy_dir.iterdir():
+                    if entry.is_dir() and any(entry.glob("*_backtest.json")):
+                        timeframes.add(entry.name.lower())
 
-        # Also support legacy layout where files live directly under the base directory
-        root_files = list(self.base_dir.glob("*_backtest.json"))
-        for file in root_files:
-            name = file.stem
-            parts = name.split("_")
-            if len(parts) >= 3:
-                candidate = parts[-2].lower()
-                timeframes.add(candidate)
+        # Support legacy structure: backtest_results/timeframe/
+        if not timeframes:
+            for entry in self.base_dir.iterdir():
+                if entry.is_dir() and any(entry.glob("*_backtest.json")):
+                    timeframes.add(entry.name.lower())
 
         return sorted(timeframes)
 
+    def set_strategy(self, strategy: str) -> None:
+        """Change the active strategy."""
+        self.strategy = strategy.upper()
+        
     def set_timeframe(self, timeframe: str) -> None:
+        """Change the active timeframe."""
         self.timeframe = timeframe.strip().lower()
 
-    def _timeframe_dir(self) -> Path:
-        if self.timeframe and (self.base_dir / self.timeframe).exists():
-            return self.base_dir / self.timeframe
+    def _cache_dir(self) -> Path:
+        """Get the directory containing cache files for current strategy/timeframe."""
+        # New structure: backtest_results/STRATEGY/timeframe/
+        if self.strategy and self.timeframe:
+            new_path = self.base_dir / self.strategy / self.timeframe
+            if new_path.exists():
+                return new_path
+        
+        # Legacy structure: backtest_results/timeframe/
+        if self.timeframe:
+            legacy_path = self.base_dir / self.timeframe
+            if legacy_path.exists():
+                return legacy_path
+                
         return self.base_dir
 
     def _filename_suffix(self) -> str:
@@ -81,7 +138,8 @@ class BacktestCacheRepository:
         return suffix
 
     def list_symbols(self) -> List[str]:
-        directory = self._timeframe_dir()
+        """List available symbols for current strategy/timeframe."""
+        directory = self._cache_dir()
         if not directory.exists():
             return []
 
@@ -97,11 +155,13 @@ class BacktestCacheRepository:
     # Loading helpers
     # ------------------------------------------------------------------
     def load(self, symbol: str) -> CachedBacktest:
-        directory = self._timeframe_dir()
+        """Load cached backtest data for a symbol."""
+        directory = self._cache_dir()
         cache_path = directory / f"{symbol.lower()}{self._filename_suffix()}"
         if not cache_path.exists():
             raise FileNotFoundError(
                 f"Cached backtest not found for {symbol} ({cache_path}). "
+                f"Strategy: {self.strategy}, Timeframe: {self.timeframe}. "
                 "Run 'python -m quant_trading.backtesting.run_backtest' to generate the data first."
             )
 
@@ -190,22 +250,19 @@ class TradeVisualizerApp:
         self,
         root: tk.Tk,
         repository: BacktestCacheRepository,
-        *,
-        chart_style: str = "yahoo",
-        scatter_size: int = 60,
+    *,
+    chart_style: str = "yahoo",
+    scatter_size: int = 10,
     ) -> None:
         self.root = root
         self.repository = repository
         self.chart_style = chart_style
         self.scatter_size = scatter_size
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.timeframes = sorted(set(repository.list_timeframes()))
-        if not self.timeframes:
-            default_tf = repository.timeframe or ""
-            if default_tf:
-                self.timeframes = [default_tf]
-
-        if not self.timeframes:
+        # Initialize strategy options
+        self.strategies = sorted(set(repository.list_strategies()))
+        if not self.strategies:
             messagebox.showerror(
                 "No Data",
                 (
@@ -213,15 +270,28 @@ class TradeVisualizerApp:
                     f"{repository.base_dir}. Please run a backtest first."
                 ),
             )
+            return
+
+        initial_strategy = repository.strategy or (self.strategies[0] if self.strategies else "")
+        self.strategy_var = tk.StringVar(value=initial_strategy)
+
+        # Initialize timeframe options
+        self.timeframes = sorted(set(repository.list_timeframes()))
+        if not self.timeframes:
+            default_tf = repository.timeframe or ""
+            if default_tf:
+                self.timeframes = [default_tf]
 
         initial_timeframe = repository.timeframe or (self.timeframes[0] if self.timeframes else "")
         if initial_timeframe and initial_timeframe not in self.timeframes:
             self.timeframes.insert(0, initial_timeframe)
 
         self.timeframe_var = tk.StringVar(value=initial_timeframe)
+        
+        # Initialize symbols
         self.symbols = repository.list_symbols()
         self.symbol_var = tk.StringVar(value=self.symbols[0] if self.symbols else "")
-        self.summary_var = tk.StringVar(value="Select a symbol and click 'Load Chart'.")
+        self.summary_var = tk.StringVar(value="Select a strategy, timeframe, and symbol, then click 'Load Chart'.")
         self.canvas: FigureCanvasTkAgg | None = None
 
         self._build_layout()
@@ -233,6 +303,19 @@ class TradeVisualizerApp:
         control_frame = ttk.Frame(self.root, padding=10)
         control_frame.pack(fill=tk.X)
 
+        # Strategy selector
+        ttk.Label(control_frame, text="Strategy:").pack(side=tk.LEFT)
+        self.strategy_combo = ttk.Combobox(
+            control_frame,
+            textvariable=self.strategy_var,
+            values=self.strategies,
+            state="readonly",
+            width=8,
+        )
+        self.strategy_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self.strategy_combo.bind("<<ComboboxSelected>>", self._on_strategy_changed)
+
+        # Timeframe selector
         ttk.Label(control_frame, text="Timeframe:").pack(side=tk.LEFT)
         self.timeframe_combo = ttk.Combobox(
             control_frame,
@@ -241,9 +324,10 @@ class TradeVisualizerApp:
             state="readonly",
             width=6,
         )
-        self.timeframe_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.timeframe_combo.pack(side=tk.LEFT, padx=(0, 10))
         self.timeframe_combo.bind("<<ComboboxSelected>>", self._on_timeframe_changed)
 
+        # Symbol selector  
         ttk.Label(control_frame, text="Symbol:").pack(side=tk.LEFT)
         self.symbol_combo = ttk.Combobox(
             control_frame,
@@ -252,7 +336,7 @@ class TradeVisualizerApp:
             state="readonly",
             width=10,
         )
-        self.symbol_combo.pack(side=tk.LEFT, padx=5)
+        self.symbol_combo.pack(side=tk.LEFT, padx=(0, 10))
 
         load_btn = ttk.Button(control_frame, text="Load Chart", command=self._on_load_clicked)
         load_btn.pack(side=tk.LEFT)
@@ -284,9 +368,31 @@ class TradeVisualizerApp:
             messagebox.showerror("Cache Error", str(exc))
             return
 
-        addplots = self._build_trade_markers(cached.prices, cached.trades)
-        self._render_chart(symbol, cached.prices, addplots)
+        addplots, marker_flags = self._build_trade_markers(cached.prices, cached.trades)
+        self._render_chart(symbol, cached.prices, addplots, marker_flags)
         self.summary_var.set(self._format_summary(cached.metadata, cached.prices, cached.trades))
+
+    def _on_strategy_changed(self, _: Any) -> None:
+        """Handle strategy selection change."""
+        strategy = self.strategy_var.get()
+        self.repository.set_strategy(strategy)
+        
+        # Update timeframes for the new strategy
+        self.timeframes = sorted(set(self.repository.list_timeframes()))
+        self.timeframe_combo["values"] = self.timeframes
+        if self.timeframes:
+            self.timeframe_var.set(self.timeframes[0])
+            self.repository.set_timeframe(self.timeframes[0])
+        
+        # Update symbols for the new strategy/timeframe
+        self.symbols = self.repository.list_symbols()
+        self.symbol_combo["values"] = self.symbols
+        if self.symbols:
+            self.symbol_var.set(self.symbols[0])
+            self.summary_var.set("Select a symbol and click 'Load Chart'.")
+        else:
+            self.symbol_var.set("")
+            self.summary_var.set("No data available for selected strategy.")
 
     def _on_timeframe_changed(self, _: Any) -> None:
         timeframe = self.timeframe_var.get()
@@ -315,8 +421,9 @@ class TradeVisualizerApp:
         symbol: str,
         df_prices: pd.DataFrame,
         addplots: List[mpf.make_addplot],
+        marker_flags: Dict[str, bool] | None = None,
     ) -> None:
-        fig, _ = mpf.plot(
+        fig, axes = mpf.plot(
             df_prices,
             type="candle",
             volume=True,
@@ -329,6 +436,41 @@ class TradeVisualizerApp:
             figsize=(12, 8),
         )
 
+        price_ax = None
+        if isinstance(axes, dict):
+            price_ax = axes.get("main") or next(iter(axes.values()), None)
+        elif isinstance(axes, (list, tuple)):
+            price_ax = axes[0] if axes else None
+        else:
+            price_ax = axes
+
+        if price_ax is not None:
+            flags = marker_flags or {}
+            legend_specs = [
+                ("Long Entry", "#2ca02c", flags.get("long_entry", False)),
+                ("Long Exit", "#1f77b4", flags.get("long_exit", False)),
+                ("Short Entry", "#d62728", flags.get("short_entry", False)),
+                ("Short Exit", "#ff7f0e", flags.get("short_exit", False)),
+            ]
+            handles: List[Line2D] = []
+            marker_size = max(int(self.scatter_size * 0.7), 4)
+            for label, color, enabled in legend_specs:
+                if enabled:
+                    handles.append(
+                        Line2D(
+                            [],
+                            [],
+                            marker="o",
+                            linestyle="",
+                            markerfacecolor=color,
+                            markeredgecolor=color,
+                            markersize=marker_size,
+                            label=label,
+                        )
+                    )
+            if handles:
+                price_ax.legend(handles=handles, loc="upper left", frameon=False)
+
         if self.canvas is not None:
             self.canvas.get_tk_widget().destroy()
 
@@ -340,9 +482,14 @@ class TradeVisualizerApp:
         self,
         df_prices: pd.DataFrame,
         closed_trades: List[Dict[str, Any]],
-    ) -> List[mpf.make_addplot]:
+    ) -> tuple[List[mpf.make_addplot], Dict[str, bool]]:
         if not closed_trades:
-            return []
+            return [], {
+                "long_entry": False,
+                "long_exit": False,
+                "short_entry": False,
+                "short_exit": False,
+            }
 
         index = df_prices.index
         minutes = _timeframe_to_minutes(self.repository.timeframe)
@@ -372,24 +519,48 @@ class TradeVisualizerApp:
                 if exit_idx is not None:
                     short_exits.loc[exit_idx] = exit_price
 
+        markers_present = {
+            "long_entry": not long_entries.isna().all(),
+            "long_exit": not long_exits.isna().all(),
+            "short_entry": not short_entries.isna().all(),
+            "short_exit": not short_exits.isna().all(),
+        }
+
         addplots: List[mpf.make_addplot] = []
-        if not long_entries.isna().all():
+        if markers_present["long_entry"]:
             addplots.append(
-                mpf.make_addplot(long_entries, type="scatter", markersize=self.scatter_size, marker="^", color="#2ca02c")
+                mpf.make_addplot(long_entries, type="scatter", markersize=self.scatter_size, marker="o", color="#2ca02c")
             )
-        if not long_exits.isna().all():
+        if markers_present["long_exit"]:
             addplots.append(
-                mpf.make_addplot(long_exits, type="scatter", markersize=self.scatter_size, marker="v", color="#1f77b4")
+                mpf.make_addplot(long_exits, type="scatter", markersize=self.scatter_size, marker="o", color="#1f77b4")
             )
-        if not short_entries.isna().all():
+        if markers_present["short_entry"]:
             addplots.append(
-                mpf.make_addplot(short_entries, type="scatter", markersize=self.scatter_size, marker="v", color="#d62728")
+                mpf.make_addplot(short_entries, type="scatter", markersize=self.scatter_size, marker="o", color="#d62728")
             )
-        if not short_exits.isna().all():
+        if markers_present["short_exit"]:
             addplots.append(
-                mpf.make_addplot(short_exits, type="scatter", markersize=self.scatter_size, marker="^", color="#ff7f0e")
+                mpf.make_addplot(short_exits, type="scatter", markersize=self.scatter_size, marker="o", color="#ff7f0e")
             )
-        return addplots
+        return addplots, markers_present
+
+    def _on_close(self) -> None:
+        if self.canvas is not None:
+            try:
+                self.canvas.figure.clf()
+                self.canvas.get_tk_widget().destroy()
+            except Exception:
+                pass
+            self.canvas = None
+
+        try:
+            self.root.quit()
+        finally:
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
 
     @staticmethod
     def _locate_trade_point(
@@ -463,13 +634,19 @@ def launch_trade_visualizer(
     app = TradeVisualizerApp(root, repository, chart_style=style)
     width, height = window_size
     root.geometry(f"{width}x{height}")
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Visualize cached backtest results in a candlestick GUI.")
-    parser.add_argument("--cache-dir", default="backtest_results", help="Directory containing cached JSON files.")
-    parser.add_argument("--timeframe", default="5m", help="Timeframe suffix to look for (default: 5m).")
+    parser.add_argument("--cache-dir", default="backtest_results", help="Directory containing cached JSON files (organized as STRATEGY/TIMEFRAME/).")
+    parser.add_argument("--timeframe", default="5m", help="Default timeframe to display (default: 5m).")
     parser.add_argument("--style", default="yahoo", help="mplfinance style name (default: yahoo).")
     parser.add_argument(
         "--window-size",

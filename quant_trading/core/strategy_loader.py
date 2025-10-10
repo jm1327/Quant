@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from quant_trading.config.strategy_defaults import STRATEGY_DEFAULT_CONFIGS
 from quant_trading.strategies import BaseStrategy, get_strategy_class, STRATEGY_REGISTRY
 
 DEFAULT_STRATEGY_NAME = "MACD"
@@ -65,7 +66,7 @@ def load_strategy(strategy_name: Optional[str] = None) -> Tuple[str, BaseStrateg
             f"Unknown strategy '{selected_name}'. Available strategies: {available or 'None'}"
         )
 
-    config: Dict[str, str] = {}
+    config: Dict[str, str] = dict(STRATEGY_DEFAULT_CONFIGS.get(selected_name.upper(), {}))
     config.update(_extract_strategy_config(selected_name, file_env))
     config.update(_extract_strategy_config(selected_name, dict(os.environ)))
 

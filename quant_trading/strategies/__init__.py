@@ -4,9 +4,11 @@ from typing import Dict, Optional, Type
 
 from .base import BaseStrategy
 from .macd import MACDStrategy
+from .rsi import RSIStrategy
 
 STRATEGY_REGISTRY: Dict[str, Type[BaseStrategy]] = {
     "MACD": MACDStrategy,
+    "RSI": RSIStrategy,
 }
 
 

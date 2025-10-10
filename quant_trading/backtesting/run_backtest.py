@@ -9,7 +9,7 @@ from typing import List
 from quant_trading.backtesting.engine import BacktestEngine, HistoricalDataLoader
 from quant_trading.backtesting.cache_exporter import export_backtest_caches
 from quant_trading.config.stock_config import STOCKS
-from quant_trading.config.trading_config import INITIAL_CAPITAL
+from quant_trading.config.strategy_defaults import INITIAL_CAPITAL, DEFAULT_COMMISSION
 from quant_trading.core.strategy_loader import get_strategy_class_name_list, load_strategy
 
 
@@ -31,13 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--strategy",
-        help="Override strategy name declared in strategy.env / environment variables.",
+        required=True,
+        help="Strategy name to use for backtesting. Required parameter.",
     )
     parser.add_argument(
         "--initial-capital",
         type=float,
         default=INITIAL_CAPITAL,
-        help="Initial virtual capital for backtesting (default: trading_config.INITIAL_CAPITAL)",
+        help="Initial virtual capital for backtesting (default: strategy_defaults.INITIAL_CAPITAL)",
     )
     parser.add_argument(
         "--data-dir",
@@ -52,8 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--commission",
         type=float,
-        default=0.0,
-        help="Commission per trade execution (flat amount, default: 0)",
+        default=DEFAULT_COMMISSION,
+        help=f"Commission per trade execution (flat amount, default: {DEFAULT_COMMISSION})",
     )
     parser.add_argument(
         "--cache-dir",
@@ -73,13 +74,19 @@ def main(argv: List[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     available = get_strategy_class_name_list()
-    override_name = args.strategy.upper() if args.strategy else None
-    if override_name and override_name not in [name.upper() for name in available]:
+    
+    # Strategy is now required, so args.strategy should always be present
+    if not available:
+        parser.error("No strategies available. Please implement at least one strategy.")
+    
+    strategy_name = args.strategy.upper()
+    if strategy_name not in [name.upper() for name in available]:
+        available_str = ', '.join(sorted(available))
         parser.error(
-            f"Unknown strategy '{args.strategy}'. Available: {', '.join(sorted(available)) or 'None'}"
+            f"Unknown strategy '{args.strategy}'. Available strategies: {available_str}"
         )
 
-    strategy_name, strategy_instance, config = load_strategy(strategy_name=override_name)
+    strategy_name, strategy_instance, config = load_strategy(strategy_name=strategy_name)
 
     config = dict(config)
     if args.timeframe:
@@ -108,6 +115,7 @@ def main(argv: List[str] | None = None) -> None:
             loader=loader,
             symbols=args.symbols,
             timeframe=args.timeframe,
+            strategy_name=strategy_name,
             output_dir=args.cache_dir,
         )
         if written:
