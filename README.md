@@ -114,6 +114,50 @@ Features:
 
 > **Tip:** Re-run `python -m quant_trading.backtesting.run_backtest` whenever you refresh the CSV data or adjust strategy settings so the visualization reflects the latest trades. Use `--cache-dir` to choose a different output location or `--no-cache` to suppress cache generation.
 
+## Web Dashboard
+
+Control backtests and review performance in a browser. The backend lives under `web/backend/` (Django + Django REST Framework) and the frontend under `web/frontend/` (React + Ant Design).
+
+### Backend (Django API)
+
+```powershell
+# Activate your Python environment
+venv\Scripts\activate
+
+# Install updated dependencies
+pip install -r requirements.txt
+
+# Apply migrations (keeps the DB ready for future models)
+python web/backend/manage.py migrate
+
+# Launch the API server on http://127.0.0.1:8000
+python web/backend/manage.py runserver
+```
+
+Key endpoints:
+- `GET /api/strategies/` returns registered strategies and default symbols
+- `POST /api/backtests/` triggers the backtest engine; accepts `strategy`, `symbols`, `timeframe`, optional `start`, `end`, `initial_capital`, `commission`, and `write_cache`
+
+Adjust runtime settings with environment variables (e.g. `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CORS_ALLOWED_ORIGINS`). Static files collect into `staticfiles/`, SQLite lives at the repo root by default.
+
+### Frontend (React + Ant Design)
+
+```powershell
+cd web/frontend
+npm install
+
+# Start the Vite dev server (defaults to http://127.0.0.1:5173)
+npm run dev
+```
+
+During development the Vite proxy forwards `/api` calls to `http://localhost:8000`. Override with a `.env` file beside `package.json`:
+
+```
+VITE_API_BASE_URL=http://192.168.0.20:8000
+```
+
+The dashboard provides strategy selection, symbol/timeframe configuration, optional date range, and renders summary stats, per-symbol metrics, trade logs, and cache file paths.
+
 ### Historical Data Downloader
 
 Use the bundled script to fetch raw OHLCV bars from IBKR and write them into `market_data/`:

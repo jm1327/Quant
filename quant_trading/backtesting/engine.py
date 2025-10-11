@@ -477,12 +477,45 @@ class BacktestEngine:
                 ]
             )
 
+        equity_df["date"] = equity_df["datetime"].dt.normalize()
+
+        baseline_equity_series: Optional[pd.Series] = None
+        if symbols:
+            price_df = data[["datetime", "symbol", "close"]].copy()
+            price_df["date"] = price_df["datetime"].dt.normalize()
+            daily_close = (
+                price_df.groupby(["date", "symbol"])["close"].last().unstack("symbol")
+                if not price_df.empty
+                else pd.DataFrame()
+            )
+            if not daily_close.empty:
+                daily_close = daily_close.sort_index().ffill()
+                returns = daily_close.pct_change()
+                baseline_returns = returns.mean(axis=1, skipna=True).fillna(0.0)
+                if not baseline_returns.empty:
+                    baseline_equity_series = (1.0 + baseline_returns).cumprod() * self.initial_capital
+                    baseline_equity_series.iloc[0] = self.initial_capital
+
+        if baseline_equity_series is not None and not baseline_equity_series.empty:
+            baseline_frame = baseline_equity_series.rename("baseline_equity").reset_index()
+            baseline_frame.columns = ["date", "baseline_equity"]
+            equity_df = equity_df.merge(baseline_frame, on="date", how="left")
+            equity_df["baseline_equity"] = equity_df["baseline_equity"].ffill().fillna(self.initial_capital)
+        else:
+            equity_df["baseline_equity"] = float(self.initial_capital)
+
+        equity_df = equity_df.drop(columns=["date"])
+
         ending_equity = float(equity_df.iloc[-1]["equity"])
         net_profit = ending_equity - self.initial_capital
         total_return = net_profit / self.initial_capital if self.initial_capital else 0.0
 
         num_days = max((equity_df.iloc[-1]["datetime"] - equity_df.iloc[0]["datetime"]).days, 1)
-        annualized_return = (1 + total_return) ** (365 / num_days) - 1 if num_days > 0 else 0.0
+        growth_factor = 1.0 + total_return
+        if num_days > 0 and growth_factor > 0:
+            annualized_return = growth_factor ** (365 / num_days) - 1
+        else:
+            annualized_return = -1.0 if growth_factor < 0 else 0.0
 
         peak = equity_df["equity"].cummax()
         drawdown = (equity_df["equity"] - peak) / peak.replace(0, pd.NA)

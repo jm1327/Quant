@@ -21,7 +21,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": "缺少入场价或止损价",
+                "reason": "Missing entry or stop loss price",
             }
 
         risk_per_share = abs(entry_price - stop_loss)
@@ -31,7 +31,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": "止损价设置无效",
+                "reason": "Invalid stop loss price",
             }
 
         net_liquidation = account_info.get("NetLiquidation", 0)
@@ -41,7 +41,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": "账户净值无效",
+                "reason": "Net liquidation value is invalid",
             }
 
         max_risk_amount = net_liquidation * self.max_risk_per_trade
@@ -56,7 +56,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": f"可用资金不足: 可用资金${available_funds:.2f}, 购买力${buying_power:.2f}",
+                "reason": f"Insufficient capital: available ${available_funds:.2f}, buying power ${buying_power:.2f}",
                 "details": {"available_funds": available_funds, "buying_power": buying_power},
             }
 
@@ -73,7 +73,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": "计算出的股数为0",
+                "reason": "Calculated position size is zero",
             }
 
         actual_risk = final_quantity * risk_per_share
@@ -85,7 +85,7 @@ class RiskManager:
                 "risk_amount": 0,
                 "position_value": 0,
                 "valid": False,
-                "reason": f"所需资金${position_value:.2f} > 可用资金${usable_funds:.2f}",
+                "reason": f"Required capital ${position_value:.2f} exceeds available funds ${usable_funds:.2f}",
                 "details": {
                     "required_funds": position_value,
                     "available_funds": usable_funds,
@@ -99,7 +99,10 @@ class RiskManager:
             "risk_amount": actual_risk,
             "position_value": position_value,
             "valid": True,
-            "reason": f"风险约束:{qty_risk}股, 资金约束:{qty_cash}股, 持仓比例约束:{qty_position_ratio}股",
+            "reason": (
+                "Position sizing constraints: "
+                f"risk {qty_risk} shares, capital {qty_cash} shares, position ratio {qty_position_ratio} shares"
+            ),
             "details": {
                 "risk_constraint": qty_risk,
                 "cash_constraint": qty_cash,
@@ -116,10 +119,10 @@ class RiskManager:
         if risk_ratio > self.max_risk_per_trade * 1.1:
             return {
                 "valid": False,
-                "reason": f"风险比例{risk_ratio:.3f} > 上限{self.max_risk_per_trade:.3f}",
+                "reason": f"Risk ratio {risk_ratio:.3f} exceeds limit {self.max_risk_per_trade:.3f}",
             }
 
-        return {"valid": True, "reason": "风险检查通过"}
+        return {"valid": True, "reason": "Risk check passed"}
 
     def get_stop_loss_price(self, entry_price, action, stop_loss_pct: float = 0.03):
         if action == "BUY":
