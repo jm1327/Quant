@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Portfolio tracking utilities built atop the shared IBKR connection."""
 
-import pandas as pd
+import math
 from collections import defaultdict
+
+import pandas as pd
 
 from .ibkr_connection import IBKRConnection
 
@@ -79,7 +81,66 @@ class PortfolioTracker(IBKRConnection):
     def get_positions_df(self):
         if not self.positions:
             return pd.DataFrame()
-        return pd.DataFrame(self.positions)
+
+        positions_df = pd.DataFrame(self.positions)
+        positions_df["position"] = pd.to_numeric(positions_df.get("position"), errors="coerce").fillna(0.0)
+        positions_df["avgCost"] = pd.to_numeric(positions_df.get("avgCost"), errors="coerce").fillna(0.0)
+
+        if not self.portfolio_items:
+            positions_df["marketValue"] = positions_df["position"] * positions_df["avgCost"].fillna(0.0)
+            positions_df["marketPrice"] = positions_df["avgCost"].fillna(0.0)
+            positions_df["realizedPnl"] = 0.0
+            positions_df["unrealizedPnl"] = 0.0
+            positions_df["dailyPnl"] = 0.0
+            positions_df["unrealizedPnlRatio"] = 0.0
+            return positions_df
+
+        portfolio_df = pd.DataFrame(self.portfolio_items)
+        numeric_cols = ["marketPrice", "marketValue", "averageCost", "unrealizedPNL", "realizedPNL"]
+        for column in numeric_cols:
+            if column in portfolio_df:
+                portfolio_df[column] = pd.to_numeric(portfolio_df[column], errors="coerce")
+
+        merged = positions_df.merge(
+            portfolio_df[
+                [
+                    "accountName",
+                    "symbol",
+                    "currency",
+                    "marketPrice",
+                    "marketValue",
+                    "averageCost",
+                    "unrealizedPNL",
+                    "realizedPNL",
+                ]
+            ],
+            left_on=["account", "symbol", "currency"],
+            right_on=["accountName", "symbol", "currency"],
+            how="left",
+        )
+
+        merged["averageCost"] = merged["averageCost"].combine_first(merged["avgCost"])
+        merged["averageCost"] = merged["averageCost"].fillna(0.0)
+        merged["marketPrice"] = merged["marketPrice"].combine_first(merged["averageCost"])
+        merged["marketValue"] = merged["marketValue"].fillna(merged["position"] * merged["marketPrice"].fillna(0.0))
+        merged["unrealizedPNL"] = merged["unrealizedPNL"].fillna(
+            merged["marketValue"] - merged["position"] * merged["averageCost"].fillna(0.0)
+        )
+        merged["realizedPNL"] = merged["realizedPNL"].fillna(0.0)
+
+        realized = merged["realizedPNL"].fillna(0.0)
+        unrealized = merged["unrealizedPNL"].fillna(0.0)
+        merged["dailyPnl"] = realized + unrealized
+
+        cost_basis = (merged["averageCost"].fillna(0.0) * merged["position"]).abs()
+        merged["unrealizedPnlRatio"] = 0.0
+        non_zero_mask = cost_basis != 0
+        merged.loc[non_zero_mask, "unrealizedPnlRatio"] = unrealized[non_zero_mask] / cost_basis[non_zero_mask]
+
+        merged = merged.drop(columns=[col for col in ["accountName"] if col in merged], errors="ignore")
+        merged = merged.rename(columns={"unrealizedPNL": "unrealizedPnl", "realizedPNL": "realizedPnl"})
+
+        return merged
 
     def get_portfolio_df(self):
         if not self.portfolio_items:
@@ -107,9 +168,19 @@ class PortfolioTracker(IBKRConnection):
             print("-" * 30)
             positions_df = self.get_positions_df()
             for _, pos in positions_df.iterrows():
-                if float(pos["position"]) != 0:
+                position_size = self._to_float(pos.get("position"))
+                if position_size != 0:
+                    market_value = self._to_float(pos.get("marketValue"))
+                    daily_pnl = self._to_float(pos.get("dailyPnl"))
+                    unrealized_pnl = self._to_float(pos.get("unrealizedPnl"))
+                    ratio_pct = self._to_float(pos.get("unrealizedPnlRatio")) * 100
+                    avg_cost = self._to_float(pos.get("averageCost", pos.get("avgCost")))
+                    currency = pos.get("currency") or "N/A"
+                    symbol = pos.get("symbol") or "UNKNOWN"
                     print(
-                        f"{pos['symbol']} ({pos['currency']}): {pos['position']} shares, Avg Cost: {pos['avgCost']}"
+                        f"{symbol} ({currency}): {position_size} shares, Avg Cost: {avg_cost:.2f}, "
+                        f"Market Value: {market_value:.2f}, Daily P&L: {daily_pnl:.2f}, "
+                        f"Unrealized P&L: {unrealized_pnl:.2f} ({ratio_pct:.2f}%)"
                     )
         else:
             print("\nNo current positions")
@@ -152,6 +223,16 @@ class PortfolioTracker(IBKRConnection):
             print("Portfolio data fetch timed out")
 
         return success
+
+    @staticmethod
+    def _to_float(value, default: float = 0.0) -> float:
+        try:
+            result = float(value)
+            if math.isnan(result):
+                return default
+            return result
+        except (TypeError, ValueError):
+            return default
 
 
 def main():

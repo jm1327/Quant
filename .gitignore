@@ -28,10 +28,11 @@ strategy.env
 # Logs and runtime artifacts
 *.log
 logs/
-trading_logs/**/*.json
-trading_logs/**/*.csv
-trading_logs/**/*.log
-trading_logs/__pycache__/
+trading_logs/*.json
+trading_logs/**/__pycache__/
+trading_logs/**/*.pyc
+trading_logs/consolidated_trading_logs.json
+trading_logs/merge_trading_logs.py
 !trading_logs/**/*.py
 
 # Historical market data downloads

@@ -1,5 +1,12 @@
 import axios from "axios";
-import type { BacktestFormValues, BacktestResponse, StrategyListResponse } from "./types";
+import type {
+  BacktestFormValues,
+  BacktestResponse,
+  CreateSimulatedOrderPayload,
+  PortfolioSnapshot,
+  SimulatedOrder,
+  StrategyListResponse,
+} from "./types";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/",
@@ -50,5 +57,20 @@ export async function runBacktest(
   }
 
   const response = await api.post<BacktestResponse>("/api/backtests/", payload);
+  return response.data;
+}
+
+export async function fetchSimulatedOrders(): Promise<SimulatedOrder[]> {
+  const response = await api.get<SimulatedOrder[]>("/api/simulated-orders/");
+  return response.data;
+}
+
+export async function createSimulatedOrder(payload: CreateSimulatedOrderPayload): Promise<SimulatedOrder> {
+  const response = await api.post<SimulatedOrder>("/api/simulated-orders/", payload);
+  return response.data;
+}
+
+export async function fetchPortfolioSnapshot(): Promise<PortfolioSnapshot> {
+  const response = await api.get<PortfolioSnapshot>("/api/portfolio/");
   return response.data;
 }

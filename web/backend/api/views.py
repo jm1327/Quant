@@ -13,8 +13,10 @@ from quant_trading.backtesting.engine import BacktestEngine, HistoricalDataLoade
 from quant_trading.config.stock_config import STOCKS
 from quant_trading.config.strategy_defaults import DEFAULT_COMMISSION, INITIAL_CAPITAL
 from quant_trading.core.strategy_loader import get_strategy_class_name_list, load_strategy
+from quant_trading.core.portfolio_tracker import PortfolioTracker
 
-from .serializers import BacktestRequestSerializer
+from .models import SimulatedOrder
+from .serializers import BacktestRequestSerializer, SimulatedOrderCreateSerializer, SimulatedOrderSerializer
 
 
 def _to_iso(value: Any) -> Any:
@@ -143,3 +145,144 @@ class BacktestView(APIView):
             response_payload["cacheFiles"] = [str(path) for path in written]
 
         return Response(response_payload)
+
+
+class SimulatedOrderListCreateView(APIView):
+    """Persist simulated (paper) orders so the dashboard can display recent actions."""
+
+    def get(self, request, *args, **kwargs):
+        queryset = SimulatedOrder.objects.all()[:100]
+        serializer = SimulatedOrderSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, *args, **kwargs):
+        serializer = SimulatedOrderCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        response_data = SimulatedOrderSerializer(order).data
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+class PortfolioSnapshotView(APIView):
+    """Connect to IBKR paper trading and return a portfolio snapshot."""
+
+    def get(self, request, *args, **kwargs):
+        port = int(request.query_params.get("port", 7497))
+        client_id = int(request.query_params.get("clientId", 981))
+        timeout = int(request.query_params.get("timeout", 15))
+
+        tracker = PortfolioTracker(client_id=client_id)
+        if not tracker.connect_to_tws(port=port):
+            return Response({"detail": "Failed to connect to IBKR TWS (paper account)."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        try:
+            if not tracker.fetch_portfolio_data(timeout=timeout):
+                return Response({"detail": "Timed out while fetching portfolio data."}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+
+            cash_balances = _normalize_cash_balances(tracker.get_cash_balances())
+            positions_df = tracker.get_positions_df()
+            positions = _normalize_positions(positions_df.to_dict(orient="records")) if not positions_df.empty else []
+            holdings = _normalize_holdings(tracker.portfolio_items)
+            currency_totals = _market_value_by_currency(tracker)
+
+            payload = {
+                "retrievedAt": datetime.utcnow().isoformat() + "Z",
+                "cashBalances": cash_balances,
+                "positions": positions,
+                "holdings": holdings,
+                "marketValueByCurrency": currency_totals,
+            }
+            return Response(payload)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            tracker.disconnect_from_tws()
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_cash_balances(raw: Dict[str, Dict[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for label, currencies in raw.items():
+        amounts = []
+        for currency, info in currencies.items():
+            amount = _safe_float(info.get("value"))
+            amounts.append(
+                {
+                    "currency": currency,
+                    "value": amount,
+                    "raw": info.get("value"),
+                    "accountName": info.get("accountName"),
+                }
+            )
+        normalized.append({"label": label, "amounts": amounts})
+    return normalized
+
+
+def _normalize_positions(raw_positions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for item in raw_positions:
+        position = _safe_float(item.get("position")) or 0.0
+        if position == 0.0:
+            continue
+        avg_cost = _safe_float(item.get("averageCost") or item.get("avgCost"))
+        market_price = _safe_float(item.get("marketPrice"))
+        market_value = _safe_float(item.get("marketValue"))
+        unrealized = _safe_float(item.get("unrealizedPnl") or item.get("unrealizedPNL"))
+        realized = _safe_float(item.get("realizedPnl") or item.get("realizedPNL"))
+        daily = _safe_float(item.get("dailyPnl"))
+        ratio = _safe_float(item.get("unrealizedPnlRatio"))
+        normalized.append(
+            {
+                "symbol": item.get("symbol"),
+                "position": position,
+                "avgCost": avg_cost,
+                "marketPrice": market_price,
+                "marketValue": market_value,
+                "dailyPnl": daily,
+                "unrealizedPnl": unrealized,
+                "unrealizedPnlRatio": ratio,
+                "realizedPnl": realized,
+                "currency": item.get("currency"),
+                "exchange": item.get("exchange"),
+                "secType": item.get("secType"),
+            }
+        )
+    return normalized
+
+
+def _normalize_holdings(raw_holdings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for item in raw_holdings:
+        position = _safe_float(item.get("position")) or 0.0
+        if position == 0:
+            continue
+        normalized.append(
+            {
+                "symbol": item.get("symbol"),
+                "position": position,
+                "marketValue": _safe_float(item.get("marketValue")),
+                "unrealizedPnl": _safe_float(item.get("unrealizedPNL")),
+                "realizedPnl": _safe_float(item.get("realizedPNL")),
+                "averageCost": _safe_float(item.get("averageCost")),
+                "currency": item.get("currency"),
+                "accountName": item.get("accountName"),
+            }
+        )
+    return normalized
+
+
+def _market_value_by_currency(tracker: PortfolioTracker) -> List[Dict[str, Any]]:
+    frame = tracker.get_portfolio_df()
+    if frame.empty:
+        return []
+    summary = frame.groupby("currency")["marketValue"].sum().reset_index()
+    result: List[Dict[str, Any]] = []
+    for row in summary.itertuples(index=False):
+        result.append({"currency": getattr(row, "currency"), "marketValue": float(getattr(row, "marketValue", 0.0))})
+    return result

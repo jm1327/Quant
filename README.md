@@ -137,6 +137,8 @@ python web/backend/manage.py runserver
 Key endpoints:
 - `GET /api/strategies/` returns registered strategies and default symbols
 - `POST /api/backtests/` triggers the backtest engine; accepts `strategy`, `symbols`, `timeframe`, optional `start`, `end`, `initial_capital`, `commission`, and `write_cache`
+- `GET/POST /api/simulated-orders/` persists paper-trade fills so the UI can display a simulated order blotter
+- `GET /api/portfolio/` connects to the paper TWS session and returns cash balances, open positions, and market value totals
 
 Adjust runtime settings with environment variables (e.g. `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CORS_ALLOWED_ORIGINS`). Static files collect into `staticfiles/`, SQLite lives at the repo root by default.
 
@@ -157,6 +159,8 @@ VITE_API_BASE_URL=http://192.168.0.20:8000
 ```
 
 The dashboard provides strategy selection, symbol/timeframe configuration, optional date range, and renders summary stats, per-symbol metrics, trade logs, and cache file paths.
+
+Use the navigation toggle to switch between the historical backtest workspace and a simulated trading page where you can log paper trades, manually toggle the IBKR paper connection, inspect real-time portfolio balances (market value, daily P&L, unrealized ratios), and monitor recent activity.
 
 ### Historical Data Downloader
 
